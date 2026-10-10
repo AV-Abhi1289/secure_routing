@@ -242,18 +242,18 @@ The graphical interface enables users to visualize the selected route, inspect l
 
 The project illustrates how mathematical modelling can support routing decisions in dynamic network environments.
 
-## 16. Team Contributions
-
-Add the names of all group members and describe their actual contributions.
-
 | Team Member | Primary Role | Contributions |
 |---|---|---|
-| Member 1 | Routing Algorithm | Describe the actual work completed |
-| Member 2 | Visualization | Describe the actual work completed |
-| Member 3 | Testing and Evaluation | Describe the actual work completed |
+| Member 1 | Algorithm and Solution design | Varun Dev |
+| Member 2 | Project Coordinator | Abhijith M |
+| Member 3 | Mathematical/Logical Modeling | Emy Biju |
+| Member 4 | Implementation and Coding | Abhijit vellekkat |
+| Member 5 | Data and Experimentation | Sandeep UB |
+| Member 6 | Testing and Validation | Bineesh BB |
+| Member 7 | Presentation | Mohan Krishna |
+| Member 8 | Documanetation | Pooja |
 
-Replace this example table with your group's actual names, roles, and contributions.
 
-## 17. Repository
+## 16. Repository
 
-GitHub Repository: [Add your repository URL here]
+GitHub Repository: https://github.com/AV-Abhi1289/secure_routing
