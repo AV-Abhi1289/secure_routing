@@ -24,10 +24,10 @@ The system provides a graphical visualization of the network, displays routing m
 ## 3. Technologies Used
 
 - Python 3
-- NetworkX
-- Matplotlib
-- Tkinter (Python GUI support)
-- CSV for exporting link metrics
+- NetworkX — graph representation and network modelling
+- Matplotlib — network visualization and interactive GUI
+- Tkinter — GUI support for Matplotlib on Ubuntu
+- CSV — exporting link metrics for analysis
 
 ## 4. Network Configuration
 
