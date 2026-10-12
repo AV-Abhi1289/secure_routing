@@ -4,9 +4,10 @@ Graphical visualization connected to risk_aware_manet.py
 """
 
 import math
+import textwrap
 import networkx as nx
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, Slider
 
 import risk_aware_manet as core
 
@@ -23,6 +24,12 @@ baseline_hops = None
 degraded_link = None
 status_message = "Baseline network loaded."
 buttons = []
+
+selected_node = None
+sliders = {}
+slider_updating = False
+METRIC_LABELS = {"F": "F (forward)", "A": "ACK", "Rep": "Rep",
+                 "H": "H (false adv.)", "D": "D (drop)"}
 
 
 # ============================================================
@@ -121,7 +128,7 @@ plt.subplots_adjust(
     left=0.035,
     right=0.61,
     top=0.90,
-    bottom=0.19
+    bottom=0.28
 )
 
 metrics_display = fig.text(
@@ -130,6 +137,7 @@ metrics_display = fig.text(
     verticalalignment="top",
     family="monospace"
 )
+metrics_display.set_fontsize(8.5)
 
 
 # ============================================================
@@ -204,11 +212,24 @@ def draw_network():
         else:
             node_colors.append("skyblue")
 
+    edge_colors, edge_widths = [], []
+    for node in graph.nodes():
+        if node == selected_node:
+            edge_colors.append("red")
+            edge_widths.append(4.0)
+        elif node in core.node_overrides and core.node_overrides[node]:
+            edge_colors.append("purple")
+            edge_widths.append(3.0)
+        else:
+            edge_colors.append("black")
+            edge_widths.append(1.0)
+
     nx.draw_networkx_nodes(
         graph, positions, ax=ax,
         node_color=node_colors,
         node_size=750,
-        edgecolors="black"
+        edgecolors=edge_colors,
+        linewidths=edge_widths
     )
 
     nx.draw_networkx_labels(
@@ -225,7 +246,9 @@ def draw_network():
 
     ax.set_xlabel(
         "Grey: Eligible | Orange dashed: Filtered | "
-        "Red dashed: Degraded | Green: Selected route"
+        "Red dashed: Degraded | Green: Selected route\n"
+        "Click a node to edit its trust stats | "
+        "Red ring: selected | Purple ring: edited"
     )
 
     ax.set_aspect("equal", adjustable="datalim")
@@ -295,29 +318,144 @@ def draw_network():
 
     parameters = (
         "NETWORK AND PARAMETERS\n"
-        f"Nodes: {core.NUM_NODES}\n"
-        f"Source: N{core.SOURCE}\n"
-        f"Destination: N{core.DESTINATION}\n"
-        f"Transmission range: {core.TX_RANGE:.1f} m\n"
-        f"Discovered links: {physical_count}\n"
-        f"Eligible links: {eligible_count}\n"
-        f"Filtered links: {filtered_count}\n"
-        f"Tmin: {core.TMIN}\n"
-        f"Lmin: {core.LMIN:.1f} s\n"
-        f"Rmax: {core.RMAX}\n"
-        f"Hmax: {core.HMAX}\n"
-        f"Alpha: {core.ALPHA}  Beta: {core.BETA}\n"
-        f"Delta: {core.DELTA}  Eta: {core.ETA}\n"
-        f"Simulation time: {core.SIMULATION_TIME:.1f} s\n"
+        f"Src N{core.SOURCE} -> Dst N{core.DESTINATION} | "
+        f"Range {core.TX_RANGE:.0f} m | Time {core.SIMULATION_TIME:.0f} s\n"
+        f"Links: {physical_count} found, {eligible_count} eligible, "
+        f"{filtered_count} filtered\n"
+        f"Tmin {core.TMIN} | Lmin {core.LMIN:.0f} s | "
+        f"Rmax {core.RMAX} | Hmax {core.HMAX}\n"
+        f"Alpha {core.ALPHA} Beta {core.BETA} | "
+        f"Delta {core.DELTA} Eta {core.ETA}\n"
         f"Degraded link: {degraded_text}\n"
     )
 
     metrics_display.set_text(
-        f"STATUS: {status_message}\n\n"
+        f"{textwrap.fill('STATUS: ' + status_message, 62)}\n\n"
+        f"{selected_node_text()}"
         f"{current_metrics}{parameters}"
     )
 
     fig.canvas.draw_idle()
+
+
+
+# ============================================================
+# 5b. NODE SELECTION AND EDITING
+# ============================================================
+
+def node_value(node, key):
+    """Override if set, otherwise the average over the node's links."""
+    override = core.node_overrides.get(node, {})
+    if key in override:
+        return override[key]
+
+    values = [
+        core.get_metrics(link)[key]
+        for link in core.discover_links() if node in link
+    ]
+    if values:
+        return sum(values) / len(values)
+    return core.DEFAULT_METRICS[key]
+
+
+def selected_node_text():
+    if selected_node is None:
+        return "SELECTED NODE\nClick a node to edit its stats.\n\n"
+
+    n = selected_node
+    override = core.node_overrides.get(n, {})
+    edited = ", ".join(
+        f"{k}={v:.2f}" for k, v in override.items()
+    ) or "none"
+
+    lines = [f"SELECTED NODE: N{n}", f"Edited values: {edited}",
+             "Link   Trust Life  Risk  Status"]
+
+    incident = [l for l in core.discover_links() if n in l]
+    incident.sort(key=lambda l: core.calculate_link_risk(l), reverse=True)
+    hidden = max(0, len(incident) - 5)
+
+    for link in incident[:5]:
+        trust = core.calculate_trust(link)
+        life = core.calculate_link_lifetime(link)
+        risk = core.calculate_link_risk(link)
+
+        if link_is_degraded(link):
+            status = "DEGRADED"
+        elif core.is_link_valid(link):
+            status = "ok"
+        else:
+            status = link_filter_reason(link)
+
+        lines.append(
+            f"N{link[0]}-N{link[1]}  {trust:.2f}  {life:5.1f} "
+            f"{safe_number(risk, 2):>5} {status}"
+        )
+
+    if hidden:
+        lines.append(f"... {hidden} more links (highest risk shown)")
+
+    return "\n".join(lines) + "\n\n"
+
+
+def sync_sliders():
+    global slider_updating
+    slider_updating = True
+    for key, slider in sliders.items():
+        slider.set_val(
+            node_value(selected_node, key)
+            if selected_node is not None else 0.0
+        )
+    slider_updating = False
+
+
+def on_node_click(event):
+    global selected_node, status_message
+
+    if event.inaxes is not ax or event.button != 1:
+        return
+    if event.xdata is None or event.ydata is None:
+        return
+
+    best, best_distance = None, 7.0
+    for node in range(core.NUM_NODES):
+        x, y = core.positions[node]
+        d = math.hypot(event.xdata - x, event.ydata - y)
+        if d < best_distance:
+            best, best_distance = node, d
+
+    if best is None:
+        return
+
+    selected_node = best
+    status_message = f"Selected N{best}. Use the sliders to edit its stats."
+    sync_sliders()
+    draw_network()
+
+
+def make_slider_handler(key):
+    def handler(value):
+        global status_message
+        if slider_updating or selected_node is None:
+            return
+        core.node_overrides.setdefault(selected_node, {})[key] = round(value, 2)
+        status_message = (
+            f"N{selected_node}: {key} set to {value:.2f}; "
+            "route recalculated."
+        )
+        draw_network()
+    return handler
+
+
+def reset_selected_node(event):
+    global status_message
+    if selected_node is None:
+        status_message = "No node selected."
+    else:
+        core.node_overrides.pop(selected_node, None)
+        status_message = f"N{selected_node} stats restored to defaults."
+        sync_sliders()
+    draw_network()
 
 
 # ============================================================
@@ -332,6 +470,7 @@ def reset_baseline(event):
     capture_baseline()
 
     status_message = "Baseline restored."
+    sync_sliders()
     draw_network()
 
 
@@ -546,6 +685,78 @@ def save_link_metrics(event):
 
 
 # ============================================================
+# 12b. DEMO PRESETS
+# ============================================================
+
+BAD = {"H": 0.90, "D": 0.80, "A": 0.10}
+
+PRESETS = [
+    {
+        "label": "Malicious\nRelay N7",
+        "text": "Malicious relay: N7 now advertises falsely and drops "
+                "packets, so the route avoids it.",
+        "overrides": {7: dict(BAD)},
+        "select": 7,
+    },
+    {
+        "label": "Two Bad\nRelays",
+        "text": "Two compromised relays (N7, N2): a longer 3-hop route "
+                "is chosen to avoid both.",
+        "overrides": {7: dict(BAD), 2: dict(BAD)},
+        "select": 7,
+    },
+    {
+        "label": "Suspicious\nN7",
+        "text": "Mildly suspicious N7 (low Rep, some drops): route is "
+                "kept but its risk rises sharply.",
+        "overrides": {7: {"Rep": 0.30, "D": 0.40}},
+        "select": 7,
+    },
+    {
+        "label": "Mobility\n+120 s",
+        "text": "Nodes drift for 120 s: link lifetimes change and "
+                "the route moves to N3.",
+        "overrides": {},
+        "advance": 120.0,
+        "select": None,
+    },
+    {
+        "label": "Total\nBlackout",
+        "text": "All relays N1-N8 compromised: no feasible route "
+                "satisfies the constraints.",
+        "overrides": {n: dict(BAD) for n in range(1, 9)},
+        "select": None,
+    },
+]
+
+
+def apply_preset(preset):
+    global degraded_link, selected_node, status_message
+
+    # Clean network first, so the baseline comparison is always
+    # against the healthy network.
+    core.reset_simulation()
+    degraded_link = None
+    capture_baseline()
+
+    for node, values in preset["overrides"].items():
+        core.node_overrides[node] = dict(values)
+
+    if preset.get("advance"):
+        core.advance_simulation(preset["advance"])
+
+    selected_node = preset.get("select")
+    status_message = "PRESET - " + preset["text"]
+
+    sync_sliders()
+    draw_network()
+
+
+def make_preset_callback(preset):
+    return lambda event: apply_preset(preset)
+
+
+# ============================================================
 # 13. CREATE BUTTONS
 # ============================================================
 
@@ -590,6 +801,39 @@ create_button(
     [0.49, 0.025, 0.13, 0.05],
     "Save CSV", save_link_metrics
 )
+
+
+# ---------------- Demo preset buttons ----------------
+
+fig.text(0.035, 0.225, "DEMO PRESETS", fontsize=9, fontweight="bold")
+
+for index, preset in enumerate(PRESETS):
+    create_button(
+        [0.035 + index * 0.117, 0.165, 0.105, 0.055],
+        preset["label"], make_preset_callback(preset)
+    )
+    buttons[-1].label.set_fontsize(8)
+
+# ---------------- Node editing controls ----------------
+
+fig.text(0.78, 0.205, "EDIT SELECTED NODE", fontsize=9,
+         fontweight="bold")
+
+for index, key in enumerate(core.METRIC_KEYS):
+    slider_axis = plt.axes([0.78, 0.17 - index * 0.026, 0.16, 0.018])
+    slider = Slider(slider_axis, METRIC_LABELS[key], 0.0, 1.0,
+                    valinit=0.0, valstep=0.01)
+    slider.label.set_fontsize(8)
+    slider.valtext.set_fontsize(8)
+    slider.on_changed(make_slider_handler(key))
+    sliders[key] = slider
+
+create_button(
+    [0.78, 0.015, 0.16, 0.03],
+    "Reset Selected Node", reset_selected_node
+)
+
+fig.canvas.mpl_connect("button_press_event", on_node_click)
 
 
 # ============================================================

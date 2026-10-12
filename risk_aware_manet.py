@@ -89,6 +89,12 @@ special_metrics = {
 }
 degraded_links = set()
 
+# Per-node trust overrides edited from the GUI: {node: {"F":..,"A":..,...}}
+# Only the keys the user has changed are stored.
+node_overrides = {}
+METRIC_KEYS = ("F", "A", "Rep", "H", "D")
+LOWER_IS_WORSE = ("F", "A", "Rep")   # for H and D, higher is worse
+
 
 # -------------------- Link utilities --------------------
 
@@ -119,6 +125,14 @@ def get_metrics(link):
     metrics = dict(DEFAULT_METRICS)
     if link in special_metrics:
         metrics.update(special_metrics[link])
+    # Node overrides: if both endpoints override a metric, the worse value wins.
+    for key in METRIC_KEYS:
+        values = [
+            node_overrides[n][key] for n in link
+            if n in node_overrides and key in node_overrides[n]
+        ]
+        if values:
+            metrics[key] = min(values) if key in LOWER_IS_WORSE else max(values)
     if link in degraded_links:
         metrics["A"] = 0.05
         metrics["D"] = 0.95
@@ -305,6 +319,7 @@ def reset_simulation():
     positions.clear()
     positions.update(initial_positions)
     degraded_links.clear()
+    node_overrides.clear()
     SIMULATION_TIME = 0.0
 
 
